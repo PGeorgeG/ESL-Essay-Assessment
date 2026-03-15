@@ -256,9 +256,14 @@ body.test-mode .test-badge { display:inline; }
       <div class="page-sub">Run AI analysis for all students. Each student is scored against the rubric.</div>
 
       <div class="card">
-        <div style="display:flex;gap:0.7rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <div style="display:flex;gap:0.7rem;align-items:center;flex-wrap:wrap;margin-bottom:0.6rem;">
           <button class="btn btn-primary" id="btn-run-all" onclick="runAllQueue()">Run All Analyses →</button>
           <button class="btn btn-ghost" id="btn-abort" onclick="abortQueue()" style="display:none;border-color:var(--red);color:var(--red);">⏹ Stop</button>
+        </div>
+        <div id="queue-select-controls" style="display:none;font-size:0.78rem;color:var(--muted);margin-bottom:0.8rem;display:flex;gap:0.8rem;">
+          <button onclick="selectAllQueue(true)" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:0.78rem;font-family:'DM Sans',sans-serif;padding:0;">Select all</button>
+          <button onclick="selectAllQueue(false)" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:0.78rem;font-family:'DM Sans',sans-serif;padding:0;">Deselect all</button>
+          <span id="queue-selected-count" style="margin-left:auto;"></span>
         </div>
         <div id="queue-running-msg" style="display:none;font-size:0.83rem;color:var(--accent);margin-bottom:0.8rem;"><span id="queue-running-label" class="dots">Analysing</span></div>
         <div id="queue-list"><p style="color:var(--muted);font-size:0.88rem;font-style:italic;">No students loaded. Upload a spreadsheet in Setup.</p></div>
@@ -467,8 +472,14 @@ function renderQueueList() {
   const el = document.getElementById('queue-list');
   if (!students.length) {
     el.innerHTML = '<p style="color:var(--muted);font-size:0.88rem;font-style:italic;">No students loaded. Upload a spreadsheet in Setup.</p>';
+    const ctrl = document.getElementById('queue-select-controls');
+    if (ctrl) ctrl.style.display = 'none';
     return;
   }
+  const ctrl = document.getElementById('queue-select-controls');
+  if (ctrl) ctrl.style.display = 'flex';
+  updateQueueSelectedCount();
+
   el.innerHTML = students.map(function(s) {
     let statusCls, statusLbl;
     switch(s.status) {
@@ -483,12 +494,38 @@ function renderQueueList() {
     }
     const levelTag = s.detectedLevel ? ' <strong>' + s.detectedLevel + '</strong>' : '';
     const displayName = s.name.replace(/^Row \d+ — /, '');
-    return '<div class="queue-item">' +
+    const checked = s.selected !== false ? 'checked' : '';
+    const dimmed = s.selected === false ? 'opacity:0.45;' : '';
+    return '<div class="queue-item" style="' + dimmed + '">' +
+      '<input type="checkbox" ' + checked + ' style="flex-shrink:0;cursor:pointer;accent-color:var(--accent);" onchange="toggleQueueSelect(\'' + s.id + '\', this.checked)" />' +
       '<span class="queue-status ' + statusCls + '">' + statusLbl + '</span>' +
       '<span style="flex:1;">' + escapeHtml(displayName) + levelTag + '</span>' +
       (s.status === 'error' ? '<button class="btn btn-ghost" style="padding:0.3rem 0.7rem;font-size:0.78rem;" onclick="retryStudent(\'' + s.id + '\')">Retry</button>' : '') +
       '</div>';
   }).join('');
+}
+
+function toggleQueueSelect(id, checked) {
+  const s = students.find(function(st) { return st.id === id; });
+  if (s) s.selected = checked;
+  updateQueueSelectedCount();
+  // Re-render just the dimming without full redraw (update opacity in place)
+  const items = document.querySelectorAll('#queue-list .queue-item');
+  students.forEach(function(st, i) {
+    if (items[i]) items[i].style.opacity = st.selected === false ? '0.45' : '1';
+  });
+}
+
+function selectAllQueue(checked) {
+  students.forEach(function(s) { s.selected = checked; });
+  renderQueueList();
+}
+
+function updateQueueSelectedCount() {
+  const total = students.length;
+  const selected = students.filter(function(s) { return s.selected !== false; }).length;
+  const el = document.getElementById('queue-selected-count');
+  if (el) el.textContent = selected + ' of ' + total + ' selected';
 }
 
 async function retryStudent(id) {
@@ -510,7 +547,8 @@ async function runAllQueue() {
   document.getElementById('btn-abort').style.display = 'inline-block';
   document.getElementById('queue-running-msg').style.display = 'block';
 
-  const pending = students.filter(function(s) { return s.status !== 'done'; });
+  const pending = students.filter(function(s) { return s.status !== 'done' && s.selected !== false; });
+  if (!pending.length) { alert('No students selected. Check the boxes next to the students you want to analyse.'); document.getElementById('btn-run-all').disabled = false; document.getElementById('btn-abort').style.display = 'none'; document.getElementById('queue-running-msg').style.display = 'none'; return; }
 
   for (var i = 0; i < pending.length; i += PARALLEL_BATCH) {
     if (abortRequested) break;
