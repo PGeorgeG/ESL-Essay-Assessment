@@ -333,6 +333,7 @@ body.test-mode .test-badge { display:inline; }
           <p class="helper">Generates student-facing feedback for every analysed student in parallel. No teacher input — label clearly as AI-generated when sharing.</p>
           <div style="display:flex;gap:0.7rem;align-items:center;flex-wrap:wrap;">
             <button class="btn btn-primary" id="btn-gen-aifb" onclick="generateAIFeedbackBatch()">Generate AI-Only Feedback →</button>
+            <button class="btn btn-ghost" id="btn-retry-errors-aifb" onclick="retryErroredFeedback()" style="display:none;">Retry errors</button>
             <button class="btn btn-ghost" id="btn-abort-aifb" onclick="abortAIFeedback()" style="display:none;border-color:var(--red);color:var(--red);">⏹ Stop</button>
           </div>
           <div id="aifb-running-msg" style="display:none;font-size:0.83rem;color:var(--accent);margin-top:0.6rem;"><span id="aifb-running-label" class="dots">Generating feedback</span></div>
@@ -1110,20 +1111,26 @@ async function generateAIFeedbackBatch() {
         aiFeedbacks[s.id] = 'Mock feedback for ' + s.name.replace(/^Row \d+ — /, '') + ' at ' + feedbackLevel + ' level. Your writing shows effort and some clear strengths. Keep up the good work!';
         return;
       }
-      try {
-        const grammarFocus = grammarScope[feedbackLevel] || grammarScope['A2'];
-        const sys = 'Writing teacher. Write feedback directly to the student. Warm, encouraging, concise. Address as "you". Use only verbatim quotes.';
-        const prompt = 'Write short feedback directly to this student.\n\n' +
-          'Student detected level: ' + s.detectedLevel + '. Write feedback at ' + feedbackLevel + ' level.\n' +
-          'Grammar: only address ' + grammarFocus + '.\n' +
-          'IMPORTANT: Never mention CEF levels or codes in the feedback.\n' +
-          considerationsNote + '\n\n' +
-          'Analysis:\n' + s.analysisText + '\n\n' +
-          'Text:\n"""\n' + s.text.substring(0, 800) + '\n"""\n\n' +
-          'Format:\n- One sentence opening (positive, specific)\n- 1–2 short paragraphs: one strength, one improvement with verbatim quote\n- One closing sentence\n- Target: 120–180 words';
-        aiFeedbacks[s.id] = await callSonnet([{ role: 'user', content: prompt }], sys, 500);
-      } catch(e) {
-        aiFeedbacks[s.id] = '(Error generating feedback)';
+      const grammarFocus = grammarScope[feedbackLevel] || grammarScope['A2'];
+      const sys = 'Writing teacher. Write feedback directly to the student. Warm, encouraging, concise. Address as "you". Use only verbatim quotes.';
+      const prompt = 'Write short feedback directly to this student.\n\n' +
+        'Student detected level: ' + s.detectedLevel + '. Write feedback at ' + feedbackLevel + ' level.\n' +
+        'Grammar: only address ' + grammarFocus + '.\n' +
+        'IMPORTANT: Never mention CEF levels or codes in the feedback.\n' +
+        considerationsNote + '\n\n' +
+        'Analysis:\n' + s.analysisText + '\n\n' +
+        'Text:\n"""\n' + s.text.substring(0, 800) + '\n"""\n\n' +
+        'Format:\n- One sentence opening (positive, specific)\n- 1–2 short paragraphs: one strength, one improvement with verbatim quote\n- One closing sentence\n- Target: 120–180 words';
+      let attempts = 0;
+      while (attempts < 3) {
+        try {
+          aiFeedbacks[s.id] = await callSonnet([{ role: 'user', content: prompt }], sys, 500);
+          break;
+        } catch(e) {
+          attempts++;
+          if (attempts < 3) await new Promise(function(r) { setTimeout(r, 1500 * attempts); });
+          else aiFeedbacks[s.id] = '(Error generating feedback — click Regenerate to retry)';
+        }
       }
     }));
 
@@ -1140,6 +1147,41 @@ async function generateAIFeedbackBatch() {
   renderAIFbResults(false);
 }
 
+async function retryErroredFeedback() {
+  const errored = students.filter(function(s) { return aiFeedbacks[s.id] && aiFeedbacks[s.id].startsWith('(Error'); });
+  if (!errored.length) return;
+  errored.forEach(function(s) { delete aiFeedbacks[s.id]; });
+  renderAIFbResults(false);
+  await generateAIFeedbackBatch();
+}
+
+async function regenerateSingleFeedback(id) {
+  const s = students.find(function(st) { return st.id === id; });
+  if (!s) return;
+  delete aiFeedbacks[s.id];
+  renderAIFbResults(false);
+  const feedbackLevel = document.getElementById('aifb-level-select').value;
+  const considerations = document.getElementById('considerations-input').value.trim();
+  const considerationsNote = considerations ? '\n\nTeacher notes: ' + considerations : '';
+  const grammarFocus = grammarScope[feedbackLevel] || grammarScope['A2'];
+  const sys = 'Writing teacher. Write feedback directly to the student. Warm, encouraging, concise. Address as "you". Use only verbatim quotes.';
+  const prompt = 'Write short feedback directly to this student.\n\n' +
+    'Student detected level: ' + s.detectedLevel + '. Write feedback at ' + feedbackLevel + ' level.\n' +
+    'Grammar: only address ' + grammarFocus + '.\n' +
+    'IMPORTANT: Never mention CEF levels or codes in the feedback.\n' +
+    considerationsNote + '\n\n' +
+    'Analysis:\n' + s.analysisText + '\n\n' +
+    'Text:\n"""\n' + s.text.substring(0, 800) + '\n"""\n\n' +
+    'Format:\n- One sentence opening (positive, specific)\n- 1–2 short paragraphs: one strength, one improvement with verbatim quote\n- One closing sentence\n- Target: 120–180 words';
+  try {
+    aiFeedbacks[s.id] = await callSonnet([{ role: 'user', content: prompt }], sys, 500);
+  } catch(e) {
+    aiFeedbacks[s.id] = '(Error generating feedback — click Regenerate to retry)';
+  }
+  renderAIFbResults(false);
+  saveState();
+}
+
 function abortAIFeedback() {
   aiFbAbortRequested = true;
   document.getElementById('btn-abort-aifb').textContent = '⏹ Stopping…';
@@ -1147,7 +1189,7 @@ function abortAIFeedback() {
 }
 
 function renderAIFbResults(partial) {
-  const analysed = students.filter(function(s) { return s.detectedLevel && aiFeedbacks[s.id]; });
+  const analysed = students.filter(function(s) { return s.detectedLevel && s.analysisText && aiFeedbacks[s.id]; });
   if (!analysed.length) return;
   let html = '';
   analysed.forEach(function(s) {
@@ -1158,11 +1200,18 @@ function renderAIFbResults(partial) {
     html += '<div class="ex-student-block">' +
       '<div class="ex-student-name">' + escapeHtml(displayName) + flagBadge + '</div>' +
       '<div class="ex-student-meta"><em class="ex-level-heading">' + (s.detectedLevel || '') + (cefDesc[s.detectedLevel] ? ' — ' + cefDesc[s.detectedLevel] : '') + '</em>' + scoreNote + '</div>' +
-      '<div class="ex-feedback">' + escapeHtml(aiFeedbacks[s.id]) + '</div>' +
+      (aiFeedbacks[s.id].startsWith('(Error') ?
+        '<div style="font-size:0.85rem;color:var(--red);margin-bottom:0.4rem;">' + escapeHtml(aiFeedbacks[s.id]) + ' <button onclick="regenerateSingleFeedback(\'' + s.id + '\')" style="background:none;border:1px solid var(--red);border-radius:3px;color:var(--red);font-size:0.75rem;padding:0.1rem 0.5rem;cursor:pointer;margin-left:0.4rem;">Retry</button></div>'
+        : '<div class="ex-feedback">' + escapeHtml(aiFeedbacks[s.id]) + '</div>') +
       '</div>';
   });
   const pending = students.filter(function(s) { return s.detectedLevel && !aiFeedbacks[s.id] && !s.flags.includes('no-submission'); });
   if (partial && pending.length) html += '<div style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem;">' + pending.length + ' student' + (pending.length !== 1 ? 's' : '') + ' pending…</div>';
+  // Show/hide retry errors button
+  const errorCount = Object.values(aiFeedbacks).filter(function(v) { return v && v.startsWith('(Error'); }).length;
+  const retryBtn = document.getElementById('btn-retry-errors-aifb');
+  if (retryBtn) retryBtn.style.display = errorCount > 0 ? 'inline-block' : 'none';
+
   document.getElementById('aifb-block').innerHTML = html;
   document.getElementById('aifb-results-card').style.display = 'block';
 }
