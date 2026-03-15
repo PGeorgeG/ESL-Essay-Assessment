@@ -1,15 +1,7 @@
 {
-  "name": "writing-analysis",
+  "name": "esl-writing-analysis",
   "version": "1.0.0",
-  "description": "ESL Writing Analysis Tool",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "dependencies": {
-    "express": "^4.18.2"
-  }
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.18.2" }
 }
