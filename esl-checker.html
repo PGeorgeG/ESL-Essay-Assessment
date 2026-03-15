@@ -30,7 +30,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 
 /* ── LAYOUT ── */
 .shell { display: flex; min-height: 100vh; }
-.sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow: hidden; }
 .main { flex: 1; padding: 2rem 2.5rem 4rem; max-width: 860px; }
 
 /* ── SIDEBAR ── */
@@ -40,7 +40,8 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .sidebar-section { padding: 0.9rem 1.4rem; border-bottom: 1px solid var(--border); }
 .sidebar-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; }
 
-.nav-btn { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.6rem 1.4rem; background: transparent; border: none; border-left: 2px solid transparent; color: var(--muted); font-size: 0.85rem; font-family: 'DM Sans', sans-serif; cursor: pointer; text-align: left; transition: all 0.12s; }
+.nav-btn { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.5rem 1.2rem; background: transparent; border: none; border-left: 2px solid transparent; color: var(--muted); font-size: 0.83rem; font-family: 'DM Sans', sans-serif; cursor: pointer; text-align: left; transition: all 0.12s; }
+.nav-btn svg { width: 14px; height: 14px; flex-shrink: 0; opacity: 0.7; }
 .nav-btn:hover { color: var(--text); }
 .nav-btn.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
 
@@ -364,6 +365,10 @@ body.test-mode .test-badge { display:inline; }
     <div style="margin-bottom:0.8rem;">
       <label class="lbl">Student name column</label>
       <select id="modal-name-col" style="margin-bottom:0;"></select>
+    </div>
+    <div style="margin-bottom:0.8rem;">
+      <label class="lbl">Email column <span style="font-weight:300;color:var(--muted);">(optional)</span></label>
+      <select id="modal-email-col" style="margin-bottom:0;"></select>
     </div>
     <div style="margin-bottom:1.2rem;">
       <label class="lbl">Writing sample column</label>
@@ -769,12 +774,15 @@ function handleXlsxUpload(event) {
       xlsxOriginalRows = rows.slice(1);
       // Populate modal
       const nameOpts = xlsxOriginalHeaders.map(function(h, i) { return '<option value="' + i + '">' + h + '</option>'; }).join('');
+      const noneOpt = '<option value="-1">(none)</option>';
       document.getElementById('modal-name-col').innerHTML = nameOpts;
+      document.getElementById('modal-email-col').innerHTML = noneOpt + nameOpts;
       document.getElementById('modal-text-col').innerHTML = nameOpts;
       // Try to auto-detect
       xlsxOriginalHeaders.forEach(function(h, i) {
         const lh = h.toLowerCase();
         if (lh.includes('name') || lh.includes('first')) document.getElementById('modal-name-col').value = i;
+        if (lh.includes('email') || lh.includes('mail')) document.getElementById('modal-email-col').value = i;
         if (lh.includes('writing') || lh.includes('essay') || lh.includes('text') || lh.includes('22')) document.getElementById('modal-text-col').value = i;
       });
       document.getElementById('xlsx-modal').style.display = 'flex';
@@ -787,6 +795,7 @@ function handleXlsxUpload(event) {
 
 function confirmXlsxMapping() {
   const nameCol = parseInt(document.getElementById('modal-name-col').value);
+  const emailCol = parseInt(document.getElementById('modal-email-col').value);
   const textCol = parseInt(document.getElementById('modal-text-col').value);
   document.getElementById('xlsx-modal').style.display = 'none';
 
@@ -801,9 +810,11 @@ function confirmXlsxMapping() {
     const name = String(row[nameCol] || '').trim();
     const text = String(row[textCol] || '').trim();
     if (!name) return;
+    const email = emailCol >= 0 ? String(row[emailCol] || '').trim() : '';
     students.push({
       id: uid(),
       name: 'Row ' + (idx + 2) + ' — ' + name,
+      email: email,
       text: text,
       status: 'pending',
       detectedLevel: null,
@@ -1005,7 +1016,7 @@ function downloadAssessmentXls() {
   const rubricCriteria = rubric ? rubric.criteria.map(function(c) { return c.name; }) : [];
   function esc(v) { return String(v || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   let html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Calibri,Arial,sans-serif;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d5cfc5;padding:5px 7px;text-align:left;vertical-align:top;}th{background:#d5cfc5;font-weight:bold;}td{white-space:pre-wrap;}</style></head><body><table>';
-  html += '<tr><th>Row</th><th>Student</th><th>CEF Level</th>';
+  html += '<tr><th>Row</th><th>Student</th><th>Email</th><th>CEF Level</th>';
   if (rubric) { html += '<th>Total Score</th>'; rubricCriteria.forEach(function(c) { html += '<th>' + esc(c) + '</th>'; }); }
   html += '<th>Assessment Note</th><th>Strongest</th><th>Weakest</th><th>Flags</th></tr>';
   analysed.forEach(function(s) {
@@ -1014,7 +1025,7 @@ function downloadAssessmentXls() {
     const flags = (s.flags || []).join(', ');
     const displayName = s.name.replace(/^Row \d+ — /, '');
     html += '<tr style="background:' + bg + ';">';
-    html += '<td>' + esc(s.rowNum) + '</td><td>' + esc(displayName) + '</td><td><strong>' + esc(s.detectedLevel) + '</strong></td>';
+    html += '<td>' + esc(s.rowNum) + '</td><td>' + esc(displayName) + '</td><td>' + esc(s.email || '') + '</td><td><strong>' + esc(s.detectedLevel) + '</strong></td>';
     if (rubric) {
       html += '<td>' + (sc ? sc._total + '/' + sc._max : '') + '</td>';
       rubricCriteria.forEach(function(c) { html += '<td>' + (sc && sc[c] !== undefined ? sc[c] : '') + '</td>'; });
@@ -1142,14 +1153,14 @@ function downloadAIFbXls() {
   const levelColors = { 'A1':'#fde8e8','A2':'#fdeee8','B1':'#fdf6e3','B2':'#e8f5e9','C1':'#e8f0fd' };
   function esc(v) { return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   let html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Calibri,Arial,sans-serif;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d5cfc5;padding:5px 7px;text-align:left;vertical-align:top;}th{background:#d5cfc5;font-weight:bold;}td{white-space:pre-wrap;}</style></head><body><table>';
-  html += '<tr><th>Row</th><th>Student</th><th>CEF Level</th>' + (rubric ? '<th>Score</th>' : '') + '<th>AI Feedback</th><th>Flags</th></tr>';
+  html += '<tr><th>Row</th><th>Student</th><th>Email</th><th>CEF Level</th>' + (rubric ? '<th>Score</th>' : '') + '<th>AI Feedback</th><th>Flags</th></tr>';
   analysed.forEach(function(s) {
     const bg = levelColors[s.detectedLevel] || '#ffffff';
     const sc = rubricScores[s.id];
     const flags = (s.flags || []).join(', ');
     const displayName = s.name.replace(/^Row \d+ — /, '');
     html += '<tr style="background:' + bg + ';">';
-    html += '<td>' + esc(s.rowNum) + '</td><td>' + esc(displayName) + '</td><td><strong>' + esc(s.detectedLevel) + '</strong></td>';
+    html += '<td>' + esc(s.rowNum) + '</td><td>' + esc(displayName) + '</td><td>' + esc(s.email || '') + '</td><td><strong>' + esc(s.detectedLevel) + '</strong></td>';
     if (rubric) html += '<td>' + (sc ? sc._total + '/' + sc._max : '') + '</td>';
     html += '<td>' + esc(aiFeedbacks[s.id]) + '</td><td>' + esc(flags) + '</td></tr>';
   });
